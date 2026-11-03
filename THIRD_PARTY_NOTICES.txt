@@ -1,0 +1,18 @@
+TokenMiner · programa nativo: atribuciones de terceros
+
+El programa se distribuye bajo GPL-3.0-only (LICENSE). Todas sus dependencias tienen licencias compatibles
+(MIT, MIT-0, Apache-2.0, ISC, Zlib, BSD, BSL-1.0, CC0, Unicode).
+
+El motor de Quantus viene del crate tokenminer-quantus, con sus propias atribuciones en su
+THIRD_PARTY_NOTICES.txt: incorpora copias locales de los crates engine-gpu, engine-cpu y pow-core del minero
+oficial de Quantus Network (quantus-miner v4.2.0, commit c1cf0a37dce77f98df3c73c390f958d7efddaf85,
+Apache-2.0, licenses/quantus-miner-Apache-2.0.txt) con una única modificación: seleccionar explícitamente el
+kernel oficial de 32 bits con TOKENMINER_QUANTUS_FORCE_U32=1, sin cambiar su matemática. Las constantes y la
+definición de Poseidon2 provienen de qp-poseidon-core 3.1.0 (Quantus Network, MIT,
+licenses/qp-poseidon-core-MIT.txt). pow-core usa además qpow-math del repositorio oficial de la cadena de
+Quantus (Quantus-Network/chain, etiqueta v0.7.1-q-day-2, MIT), que Cargo descarga al compilar.
+
+El motor de Pearl viene del crate tokenminer-pearl, con sus propias atribuciones en su
+THIRD_PARTY_NOTICES.txt: código de Pearl Research Labs (ISC) y plonky2 (MIT o Apache-2.0).
+
+Proyecto independiente: no está afiliado a Quantus Network ni a Pearl Research Labs.

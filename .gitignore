@@ -1,0 +1,7 @@
+target/
+dist/
+*.exe
+*.pdb
+.env*
+*.pem
+*.pfx
