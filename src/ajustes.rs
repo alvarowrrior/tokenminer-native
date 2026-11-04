@@ -190,7 +190,7 @@ pub fn fijar_arranque(activo: bool) -> std::io::Result<()> {
     }
 }
 
-/// Decide si toca minar. Una orden del usuario manda hasta que los ajustes o el horario digan otra cosa.
+/// Decide si toca minar. Una orden del usuario manda hasta que cambia el estado del horario.
 #[derive(Default)]
 pub struct Plan {
     base: bool,
@@ -213,11 +213,6 @@ impl Plan {
 
     pub fn ordenar(&mut self, minar: bool) {
         self.orden = Some(minar);
-    }
-
-    /// Si el usuario pidió empezar a mano: entonces se mina aunque no renta.
-    pub fn forzado(&self) -> bool {
-        self.orden == Some(true)
     }
 }
 

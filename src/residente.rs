@@ -384,7 +384,8 @@ impl Residente {
     /// Compara lo que toca con lo que hay.
     fn repasar(&mut self) {
         let toca = self.plan.quiere(&self.ajustes, Momento::ahora());
-        let renta = self.plan.forzado() || !self.ajustes.only_profitable || self.renta();
+        // A start requested manually overrides the time plan, but not this profitability gate.
+        let renta = !self.ajustes.only_profitable || self.renta();
         let quiere = toca && renta;
         if !quiere {
             self.reintento = None;
