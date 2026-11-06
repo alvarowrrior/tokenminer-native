@@ -51,7 +51,7 @@ Copy-Item -LiteralPath $installer -Destination $published -Force
   feePercent = $Comision
   feeAccount = $CuentaComision
   sha256 = $hash
-  version = '0.9.1'
+  version = '0.9.2'
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $public 'native-manifest.json') -Encoding utf8
 Write-Output "Paquete preparado para $($origins -join ', ') en $published"
 Write-Output "SHA256: $hash"

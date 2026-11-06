@@ -1,6 +1,6 @@
 [package]
 name = "tokenminer-native"
-version = "0.9.1"
+version = "0.9.2"
 edition = "2021"
 description = "Minero nativo de TokenMiner: mina con la GPU solo mientras resulta rentable con el precio real de la luz"
 publish = false
