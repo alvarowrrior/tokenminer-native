@@ -16,6 +16,8 @@ mod pearl;
 #[cfg(windows)]
 mod pool;
 #[cfg(windows)]
+mod potencia;
+#[cfg(windows)]
 mod quantus;
 #[cfg(windows)]
 mod reparto;

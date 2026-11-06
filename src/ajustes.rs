@@ -89,6 +89,9 @@ pub struct Ajustes {
     /// sin límite.
     pub gpu_limit: Option<u32>,
     pub coin: Eleccion,
+    /// Modo eficiencia: límite de potencia de cada GPU mientras mina, en % del de fábrica (40 a 99). Sin él, el de
+    /// fábrica. Ver `potencia`.
+    pub power_percent: Option<u32>,
 }
 
 /// Hora local. `dia` 0 es lunes.
@@ -138,6 +141,9 @@ impl Ajustes {
         }
         if self.gpu_limit.is_some_and(|l| l > 100) {
             return Err("Límite de la gráfica incorrecto".into());
+        }
+        if self.power_percent.is_some_and(|p| !(40..=100).contains(&p)) {
+            return Err("Modo eficiencia incorrecto: entre el 40 y el 100 %".into());
         }
         Ok(())
     }
@@ -312,6 +318,20 @@ mod pruebas {
         let mut bien = Ajustes::default();
         bien.electricity.price_kwh = Some(0.15);
         assert!(bien.validar().is_ok());
+        for (potencia, vale) in [
+            (None, true),
+            (Some(40), true),
+            (Some(70), true),
+            (Some(100), true),
+            (Some(39), false),
+            (Some(101), false),
+        ] {
+            let ajustes = Ajustes {
+                power_percent: potencia,
+                ..Default::default()
+            };
+            assert_eq!(ajustes.validar().is_ok(), vale, "{potencia:?}");
+        }
         for (limite, vale) in [
             (Some(80), true),
             (Some(100), true),

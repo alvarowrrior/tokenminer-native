@@ -7,6 +7,7 @@ use crate::ajustes::{self, Ajustes, Cuando, Momento, Moneda, Plan};
 use crate::cambio::{self, Medida, Medidas, Selector};
 use crate::economia::{self, Cuentas, Mercado};
 use crate::pool::{wallet_comision, COMISION};
+use crate::potencia;
 use crate::reparto::SIN_LIMITE;
 use crate::{accept_from, bandeja, PORT};
 use crate::{pearl, quantus};
@@ -151,6 +152,8 @@ struct Estado<'a> {
     coin: Option<Moneda>,
     coins: Vec<Opcion>,
     economics: Option<Economia>,
+    /// Modo eficiencia: el límite de potencia pedido, si está puesto y, si no, por qué.
+    efficiency: &'a potencia::Estado,
 }
 
 #[derive(Serialize)]
@@ -212,6 +215,9 @@ struct Residente {
     /// Uso total máximo de la GPU que lee el motor mientras mina.
     limite: Arc<AtomicU32>,
     dispositivos: Vec<Dispositivo>,
+    eficiencia: potencia::Estado,
+    /// Dónde se guarda el límite de potencia original de cada GPU mientras el modo eficiencia lo cambia.
+    ruta_potencia: PathBuf,
 }
 
 impl Residente {
@@ -264,6 +270,7 @@ impl Residente {
                 price_kwh: c.precio_kwh,
                 profitable: c.beneficio() > 0.0,
             }),
+            efficiency: &self.eficiencia,
         };
         self.estado
             .send_replace(serde_json::to_string(&estado).unwrap_or_default());
@@ -371,11 +378,20 @@ impl Residente {
             self.eventos.clone(),
             self.limite.clone(),
         ));
+        self.eficiencia = potencia::aplicar(self.porcentaje(), &self.ruta_potencia);
+    }
+
+    /// El límite de potencia pedido, en % del de fábrica; 100 es el de fábrica.
+    fn porcentaje(&self) -> u32 {
+        self.ajustes.power_percent.unwrap_or(100)
     }
 
     fn parar(&mut self) {
         if let Some(sesion) = self.sesion.take() {
             sesion.finish();
+            // Sin minar, cada GPU vuelve al límite que tenía.
+            potencia::restaurar(&self.ruta_potencia);
+            self.eficiencia = potencia::consultar(self.porcentaje());
         }
         (self.fase, self.rate, self.moneda) = ("idle", 0.0, None);
         self.selector.parar();
@@ -528,7 +544,19 @@ impl Residente {
         }
         self.limite
             .store(nuevos.gpu_limit.unwrap_or(SIN_LIMITE), Ordering::Relaxed);
+        let otra_potencia = nuevos.power_percent != self.ajustes.power_percent;
         self.ajustes = nuevos;
+        if otra_potencia {
+            // Con otro límite la velocidad y el consumo son otros: se mide de nuevo cada moneda.
+            self.medidas.clear();
+            cambio::guardar(&self.ruta_medidas, &self.medidas);
+            self.eficiencia = if self.sesion.is_some() {
+                potencia::restaurar(&self.ruta_potencia);
+                potencia::aplicar(self.porcentaje(), &self.ruta_potencia)
+            } else {
+                potencia::consultar(self.porcentaje())
+            };
+        }
         Ok(())
     }
 
@@ -635,8 +663,12 @@ pub async fn correr(origen: String) -> Result<(), Box<dyn std::error::Error>> {
     };
     let ruta = ajustes::ruta().ok_or("No se encontró LOCALAPPDATA")?;
     let ruta_medidas = cambio::ruta_de_medidas(&ruta);
+    // Si el programa se cerró mientras el modo eficiencia tenía cambiado el límite, se devuelve ahora.
+    let ruta_potencia = ruta.with_file_name("power-restore.json");
+    potencia::restaurar(&ruta_potencia);
     let medidas = cambio::leer(&ruta_medidas);
     let ajustes = Ajustes::leer(&ruta);
+    let ajustes_potencia = ajustes.power_percent.unwrap_or(100);
     let (eventos, mut eventos_rx) = unbounded_channel();
     let (entrada, mut entrada_rx): (_, UnboundedReceiver<Entrada>) = unbounded_channel();
     let (estado, estado_rx) = watch::channel(String::new());
@@ -718,6 +750,8 @@ pub async fn correr(origen: String) -> Result<(), Box<dyn std::error::Error>> {
         minando,
         limite,
         dispositivos: Vec::new(),
+        eficiencia: potencia::consultar(ajustes_potencia),
+        ruta_potencia,
     };
     r.repasar();
     let mut repaso = tokio::time::interval(REPASO);
