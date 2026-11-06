@@ -59,7 +59,8 @@ pub struct Electricidad {
     pub kind: Tarifa,
     /// €/kWh, sólo con tarifa fija.
     pub price_kwh: Option<f64>,
-    /// Lo que gasta de más el resto del equipo al minar: la gráfica se mide, esto no.
+    /// Lo que gasta de más el resto del equipo al minar: la gráfica se mide, esto no. Por defecto 0: lo demás
+    /// (pantalla, CPU en reposo) gasta lo mismo con o sin minar.
     pub extra_watts: f64,
 }
 
@@ -68,7 +69,7 @@ impl Default for Electricidad {
         Self {
             kind: Tarifa::Fija,
             price_kwh: None,
-            extra_watts: 20.0,
+            extra_watts: 0.0,
         }
     }
 }
