@@ -4,8 +4,18 @@
 use crate::ajustes::{Eleccion, Moneda};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+/// Generación de las medidas guardadas. Se sube cuando un motor cambia de velocidad, para que no se arrastre la medida
+/// vieja: la que quedó guardada decide qué moneda se mina, y una moneda que no se elige nunca se vuelve a medir. La
+/// generación 2 es la del pliegue XOR en registros de Pearl, que duplica su velocidad en las RTX 20 a 40.
+pub const GENERACION: u32 = 2;
+
+/// El archivo de medidas de esta generación, junto a los ajustes. El de generaciones anteriores se deja sin tocar.
+pub fn ruta_de_medidas(ajustes: &Path) -> PathBuf {
+    ajustes.with_file_name(format!("measurements-{GENERACION}.json"))
+}
 
 /// Muestras de 5 s para dar una moneda por medida: tres minutos.
 pub const MUESTRAS: u32 = 36;
@@ -169,6 +179,15 @@ mod pruebas {
     use super::*;
 
     const AMBAS: [Moneda; 2] = [Moneda::Pearl, Moneda::Quantus];
+
+    #[test]
+    fn las_medidas_viejas_no_se_arrastran() {
+        let ajustes = Path::new("C:/datos/TokenMiner/settings.json");
+        let ruta = ruta_de_medidas(ajustes);
+        assert_eq!(ruta, Path::new("C:/datos/TokenMiner/measurements-2.json"));
+        // El archivo de antes de la generación 2 no se lee: su velocidad de Pearl era la mitad.
+        assert_ne!(ruta, ajustes.with_file_name("measurements.json"));
+    }
 
     fn medidas(pearl: bool, quantus: bool) -> Medidas {
         let mut m = Medidas::new();

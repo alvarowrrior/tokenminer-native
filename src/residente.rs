@@ -634,7 +634,7 @@ pub async fn correr(origen: String) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     };
     let ruta = ajustes::ruta().ok_or("No se encontró LOCALAPPDATA")?;
-    let ruta_medidas = ruta.with_file_name("measurements.json");
+    let ruta_medidas = cambio::ruta_de_medidas(&ruta);
     let medidas = cambio::leer(&ruta_medidas);
     let ajustes = Ajustes::leer(&ruta);
     let (eventos, mut eventos_rx) = unbounded_channel();
