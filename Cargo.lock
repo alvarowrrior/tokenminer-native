@@ -574,7 +574,7 @@ checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 [[package]]
 name = "engine-cpu"
 version = "4.2.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.1.1#1f2ea542c5d228235e817f99e4eb9193376941ce"
+source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.0#6202fd6adfac2af271179d1fc9b1e6e1f5c6c7c5"
 dependencies = [
  "pow-core",
  "primitive-types 0.13.1",
@@ -583,7 +583,7 @@ dependencies = [
 [[package]]
 name = "engine-gpu"
 version = "4.2.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.1.1#1f2ea542c5d228235e817f99e4eb9193376941ce"
+source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.0#6202fd6adfac2af271179d1fc9b1e6e1f5c6c7c5"
 dependencies = [
  "bytemuck",
  "engine-cpu",
@@ -2140,7 +2140,7 @@ dependencies = [
 [[package]]
 name = "pow-core"
 version = "4.2.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.1.1#1f2ea542c5d228235e817f99e4eb9193376941ce"
+source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.0#6202fd6adfac2af271179d1fc9b1e6e1f5c6c7c5"
 dependencies = [
  "primitive-types 0.13.1",
  "qp-poseidon-core 3.1.0",
@@ -3168,7 +3168,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokenminer-native"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "futures-util",
  "hex",
@@ -3204,8 +3204,8 @@ dependencies = [
 
 [[package]]
 name = "tokenminer-quantus"
-version = "0.1.1"
-source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.1.1#1f2ea542c5d228235e817f99e4eb9193376941ce"
+version = "0.2.0"
+source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.0#6202fd6adfac2af271179d1fc9b1e6e1f5c6c7c5"
 dependencies = [
  "bytemuck",
  "cudarc",
