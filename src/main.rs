@@ -94,6 +94,7 @@ enum ClientMessage {
     Stop,
 }
 
+#[derive(Clone)]
 struct Work {
     revision: u64,
     job_id: String,
@@ -212,7 +213,7 @@ fn gpu_worker(
     }
     if matches!(mode, Mode::Cuda) {
         #[cfg(windows)]
-        quantus_cuda_worker(rx, tx, cancel);
+        quantus_cuda_worker(0, Arc::new(FrenoGpu::default()), rx, tx, cancel);
         #[cfg(not(windows))]
         send(
             &tx,
@@ -360,13 +361,19 @@ fn gpu_worker(
     }
 }
 
-#[cfg(windows)]
-/// Freno del motor CUDA de Quantus, que mueve el reparto de la GPU: parte del tiempo que puede ocuparla (0 o 100:
-/// sin freno) y si se aparta del todo.
-pub static LIMITE_QUANTUS: AtomicU32 = AtomicU32::new(0);
-pub static APARTADO_QUANTUS: AtomicBool = AtomicBool::new(false);
+/// Freno del motor CUDA de Quantus en una GPU, que mueve el reparto de esa GPU: parte del tiempo que puede ocuparla
+/// (0 o 100: sin freno) y si se aparta del todo. Cada GPU tiene el suyo.
+#[derive(Default)]
+pub struct FrenoGpu {
+    pub limite: AtomicU32,
+    pub apartado: AtomicBool,
+}
 
+/// El motor CUDA de Quantus en la GPU `dispositivo` (orden de CUDA). Cada GPU empieza en un nonce aleatorio, así que
+/// varias GPU con el mismo trabajo no repiten intentos.
 fn quantus_cuda_worker(
+    dispositivo: usize,
+    freno: Arc<FrenoGpu>,
     rx: std::sync::mpsc::Receiver<Command>,
     tx: mpsc::UnboundedSender<String>,
     cancel: Arc<AtomicBool>,
@@ -384,7 +391,7 @@ fn quantus_cuda_worker(
     }
     let mut fallback: Option<String> = None;
     let mut sparse = if sparse_kind != "dense" {
-        match quantus_cuda::sparse::SparseCuda::new(256, &sparse_kind).and_then(|mut sparse| {
+        match quantus_cuda::sparse::SparseCuda::new_en(dispositivo, 256, &sparse_kind).and_then(|mut sparse| {
             sparse.self_check()?;
             Ok(sparse)
         }) {
@@ -404,9 +411,10 @@ fn quantus_cuda_worker(
         None
     };
     let dense_engine = if sparse.is_some() {
-        quantus_cuda::QuantusCuda::new_variant(256, "internal")
+        quantus_cuda::QuantusCuda::new_variant_en(dispositivo, 256, "internal")
     } else {
-        quantus_cuda::QuantusCuda::new(256)
+        let variante = std::env::var("TOKENMINER_QUANTUS_CUDA_VARIANT").unwrap_or_else(|_| "baseline".into());
+        quantus_cuda::QuantusCuda::new_variant_en(dispositivo, 256, &variante)
     };
     let mut gpu = match dense_engine {
         Ok(gpu) => gpu,
@@ -491,7 +499,7 @@ fn quantus_cuda_worker(
         let Some(work) = active.as_ref() else {
             continue;
         };
-        if APARTADO_QUANTUS.load(Ordering::Relaxed) {
+        if freno.apartado.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(100));
             continue;
         }
@@ -560,7 +568,7 @@ fn quantus_cuda_worker(
         counter += count as u64;
         attempts += batch.unique_attempts;
         physical_attempts += batch.physical_attempts;
-        let limite = LIMITE_QUANTUS.load(Ordering::Relaxed);
+        let limite = freno.limite.load(Ordering::Relaxed);
         if (1..100).contains(&limite) {
             std::thread::sleep(Duration::from_secs_f64(
                 batch.kernel_ms / 1000.0 * (100 - limite) as f64 / limite as f64,
@@ -734,6 +742,55 @@ fn parse_launch(argument: &str) -> Result<(String, Mode), String> {
 #[cfg(test)]
 mod protocol_tests {
     use super::*;
+
+    /// El motor CUDA de Quantus en la GPU `TOKENMINER_PRUEBA_GPU` (0 por defecto): arranca, mina y sus candidatos
+    /// pasan la comprobación completa en CPU. Con dificultad baja salen candidatos en pocos segundos.
+    #[test]
+    #[ignore = "Requires an NVIDIA GPU"]
+    fn quantus_cuda_en_una_gpu_elegida() {
+        let dispositivo: usize = std::env::var("TOKENMINER_PRUEBA_GPU")
+            .map(|d| d.parse().unwrap())
+            .unwrap_or(0);
+        let (ordenes, rx) = std::sync::mpsc::channel();
+        let (tx, mut avisos) = mpsc::unbounded_channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let hilo = {
+            let cancel = cancel.clone();
+            std::thread::spawn(move || {
+                quantus_cuda_worker(dispositivo, Arc::new(FrenoGpu::default()), rx, tx, cancel)
+            })
+        };
+        ordenes
+            .send(Command::Work(Work {
+                revision: 1,
+                job_id: "prueba".into(),
+                header: [7; 32],
+                difficulty: U512::from(1u64 << 24),
+                extranonce: vec![0xab; 4],
+            }))
+            .unwrap();
+        let fin = Instant::now() + Duration::from_secs(8);
+        let (mut listo, mut candidatos, mut tasa) = (false, 0, 0.0);
+        while Instant::now() < fin {
+            match avisos.try_recv() {
+                Ok(texto) => {
+                    let v: serde_json::Value = serde_json::from_str(&texto).unwrap();
+                    match v["type"].as_str() {
+                        Some("ready") => listo = true,
+                        Some("candidate") => candidatos += 1,
+                        Some("stats") => tasa = v["rate"].as_f64().unwrap(),
+                        Some("error") => panic!("{v}"),
+                        _ => {}
+                    }
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+        ordenes.send(Command::Stop).unwrap();
+        hilo.join().unwrap();
+        println!("GPU {dispositivo}: {candidatos} candidatos, {:.0} MH/s", tasa / 1e6);
+        assert!(listo && candidatos > 0 && tasa > 0.0);
+    }
 
     #[test]
     fn quantus_launch_modes_and_session_contract() {
