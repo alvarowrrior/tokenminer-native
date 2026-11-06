@@ -3,7 +3,7 @@
 //!
 //! Eventos para quien lo usa: `{"type":"ready",…}`, `{"type":"pool","state":"connecting|connected|reconnecting"}`,
 //! `{"type":"share","accepted":bool,"error":…}`,
-//! `{"type":"stats","revision":n,"attempts":…,"rate":<MAC/s>,"devices":[<MAC/s de cada GPU>]}`,
+//! `{"type":"stats","revision":n,"attempts":…,"rate":<MAC/s>,"devices":[<MAC/s de cada GPU>],"sm":[<multiprocesadores de cada GPU>]}`,
 //! `{"type":"gpu","devices":[{"share":<% del tiempo para el motor>,"others":<% de los demás>,"mine":<% del motor>}]}` y
 //! `{"type":"error","message":…}`. Las GPU van en el orden de CUDA, que el programa fija al de `nvidia-smi`.
 use crate::ajustes::Moneda;
@@ -68,6 +68,8 @@ fn reenviar(
     let (mut macs, mut listas, mut vivas, mut fallo) =
         (vec![0f64; cuantas], vec![false; cuantas], cuantas, None);
     let mut vueltas = vec![0u64; cuantas];
+    // Multiprocesadores de cada GPU, 0 hasta que su motor está listo.
+    let mut sms = vec![0u32; cuantas];
     let (mut revision, mut desde, mut aviso) = (0u64, Instant::now(), Instant::now() + STATS_CADA);
     let perdida = |mensaje: &str| {
         if !parando.load(Ordering::SeqCst) {
@@ -84,9 +86,11 @@ fn reenviar(
                     mu,
                     nu,
                     variante,
+                    sm,
                 },
             )) => {
                 macs[i] = mu as f64 * nu as f64 * K as f64;
+                sms[i] = sm;
                 if !listas.contains(&true) {
                     send(
                         &tx,
@@ -144,7 +148,7 @@ fn reenviar(
             send(
                 &tx,
                 json!({"type": "stats", "revision": actual, "attempts": total, "rate": total / segundos,
-                             "devices": intentos.iter().map(|i| i / segundos).collect::<Vec<_>>()}),
+                             "devices": intentos.iter().map(|i| i / segundos).collect::<Vec<_>>(), "sm": sms}),
             );
         }
     }

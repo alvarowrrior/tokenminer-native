@@ -79,6 +79,8 @@ struct Gpu {
     memory_total_mb: Option<f64>,
     temperature_c: Option<f64>,
     power_w: Option<f64>,
+    /// Reloj de los multiprocesadores ahora mismo, en MHz.
+    clock_mhz: Option<f64>,
 }
 
 fn leer_tabla(salida: &str) -> Vec<Gpu> {
@@ -86,7 +88,7 @@ fn leer_tabla(salida: &str) -> Vec<Gpu> {
         .lines()
         .filter_map(|linea| {
             let campos: Vec<&str> = linea.split(',').map(str::trim).collect();
-            let [name, usado, memoria, total, temperatura, potencia] = campos[..] else {
+            let [name, usado, memoria, total, temperatura, potencia, reloj] = campos[..] else {
                 return None;
             };
             if name.is_empty() {
@@ -99,6 +101,7 @@ fn leer_tabla(salida: &str) -> Vec<Gpu> {
                 memory_total_mb: total.parse().ok(),
                 temperature_c: temperatura.parse().ok(),
                 power_w: potencia.parse().ok(),
+                clock_mhz: reloj.parse().ok(),
             })
         })
         .collect()
@@ -107,7 +110,7 @@ fn leer_tabla(salida: &str) -> Vec<Gpu> {
 async fn leer_gpus() -> Vec<Gpu> {
     let salida = tokio::process::Command::new("nvidia-smi")
         .args([
-            "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
+            "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.sm",
             "--format=csv,noheader,nounits",
         ])
         .creation_flags(SIN_VENTANA)
@@ -116,6 +119,17 @@ async fn leer_gpus() -> Vec<Gpu> {
     salida
         .map(|s| leer_tabla(&String::from_utf8_lossy(&s.stdout)))
         .unwrap_or_default()
+}
+
+/// Techo teórico en MAC/s de una GPU que mina `moneda`: multiprocesadores por reloj de ahora. Sólo Pearl multiplica
+/// matrices en los tensor cores; sin multiprocesadores o sin reloj no hay techo.
+fn techo(moneda: Option<Moneda>, sm: Option<u32>, reloj_mhz: Option<f64>) -> Option<f64> {
+    match (moneda, sm, reloj_mhz) {
+        (Some(Moneda::Pearl), Some(sm), Some(mhz)) if mhz > 0.0 => {
+            Some(tokenminer_pearl::techo_macs(sm, mhz))
+        }
+        _ => None,
+    }
 }
 
 #[derive(Serialize)]
@@ -158,6 +172,11 @@ struct Dispositivo {
     others: Option<f64>,
     /// Lo que usa el propio motor, en %, según Windows.
     mine: Option<f64>,
+    /// Multiprocesadores de la GPU, si el motor ya los ha dicho.
+    sm: Option<u32>,
+    /// Techo teórico de esta GPU con la moneda que se mina, en la misma unidad que `rate` y al reloj de ahora: sólo
+    /// Pearl, que multiplica matrices en los tensor cores. `rate` entre `peak` es lo cerca que está del límite.
+    peak: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -196,7 +215,23 @@ struct Residente {
 }
 
 impl Residente {
+    /// Los dispositivos con su techo teórico: multiprocesadores por reloj de ahora, sólo para Pearl.
+    fn con_techo(&self) -> Vec<Dispositivo> {
+        self.dispositivos
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                let reloj = self.gpus.get(i).and_then(|g| g.clock_mhz);
+                Dispositivo {
+                    peak: techo(self.moneda, d.sm, reloj),
+                    ..d.clone()
+                }
+            })
+            .collect()
+    }
+
     fn publicar(&self) {
+        let dispositivos = self.con_techo();
         let estado = Estado {
             r#type: "state",
             version: env!("CARGO_PKG_VERSION"),
@@ -208,7 +243,7 @@ impl Residente {
             rejected: self.rejected,
             problem: self.problema.as_deref(),
             gpus: &self.gpus,
-            devices: &self.dispositivos,
+            devices: &dispositivos,
             coin: self.moneda,
             coins: self
                 .posibles()
@@ -433,6 +468,9 @@ impl Residente {
                 self.rate = v["rate"].as_f64().unwrap_or(0.0);
                 for (i, tasa) in v["devices"].as_array().into_iter().flatten().enumerate() {
                     self.dispositivo(i).rate = tasa.as_f64().unwrap_or(0.0);
+                }
+                for (i, sm) in v["sm"].as_array().into_iter().flatten().enumerate() {
+                    self.dispositivo(i).sm = sm.as_u64().map(|s| s as u32).filter(|s| *s > 0);
                 }
             }
             Some("gpu") => {
@@ -723,8 +761,20 @@ mod pruebas {
     use super::*;
 
     #[test]
+    fn el_techo_sale_con_multiprocesadores_y_reloj_y_sólo_en_pearl() {
+        // 24 SM a 2270 MHz: unos 55,8 TMAC/s.
+        let t = techo(Some(Moneda::Pearl), Some(24), Some(2270.0)).unwrap();
+        assert!((t - 55.8e12).abs() < 0.1e12, "{t}");
+        assert_eq!(techo(Some(Moneda::Quantus), Some(24), Some(2270.0)), None);
+        assert_eq!(techo(None, Some(24), Some(2270.0)), None);
+        assert_eq!(techo(Some(Moneda::Pearl), None, Some(2270.0)), None);
+        assert_eq!(techo(Some(Moneda::Pearl), Some(24), None), None);
+        assert_eq!(techo(Some(Moneda::Pearl), Some(24), Some(0.0)), None);
+    }
+
+    #[test]
     fn lee_cada_grafica_y_tolera_datos_que_faltan() {
-        let salida = "NVIDIA GeForce RTX 5070 Laptop GPU, 99, 5088, 8151, 75, 114.22\r\nNVIDIA GeForce RTX 3060, [N/A], 100, 12288, 40, [N/A]\r\n\r\nrota\r\n";
+        let salida = "NVIDIA GeForce RTX 5070 Laptop GPU, 99, 5088, 8151, 75, 114.22, 2370\r\nNVIDIA GeForce RTX 3060, [N/A], 100, 12288, 40, [N/A], [N/A]\r\n\r\nrota\r\n";
         let gpus = leer_tabla(salida);
         assert_eq!(gpus.len(), 2);
         assert_eq!(gpus[0].name, "NVIDIA GeForce RTX 5070 Laptop GPU");
@@ -736,6 +786,7 @@ mod pruebas {
             ),
             (Some(99.0), Some(8151.0), Some(114.22))
         );
+        assert_eq!((gpus[0].clock_mhz, gpus[1].clock_mhz), (Some(2370.0), None));
         assert_eq!((gpus[1].use_percent, gpus[1].power_w), (None, None));
         assert_eq!(leer_tabla(""), Vec::<Gpu>::new());
     }
