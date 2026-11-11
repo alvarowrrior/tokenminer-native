@@ -210,18 +210,25 @@ impl Mando for tokenminer_pearl::trabajador::Contadores {
 }
 
 /// Mira cada dos segundos cuánto usan cada GPU los demás programas y fija la parte de su motor para no pasar de
-/// `limite`, el uso total máximo elegido, de 0 a 100, o `SIN_LIMITE`. Sin el LUID de una GPU no se ve a los demás y
-/// sólo se aplica el límite. Avisa con `{"type":"gpu","devices":[{"share":…,"others":…,"mine":…}]}`: `mine` es
-/// lo que usa el motor.
+/// `limite`, el uso total máximo elegido, de 0 a 100, o `SIN_LIMITE`. Sin el LUID de una GPU, o si Windows no da
+/// sus contadores, no se ve a los demás y sólo se aplica el límite. Avisa con
+/// `{"type":"gpu","devices":[{"share":…,"others":…,"mine":…}]}`: `mine` es lo que usa el motor.
 pub fn vigilar(
     gpus: Vec<(Arc<dyn Mando>, Option<String>)>,
     limite: Arc<AtomicU32>,
     parando: Arc<AtomicBool>,
     tx: UnboundedSender<String>,
 ) {
-    let Some(mut lector) = Lector::abrir() else {
-        return;
-    };
+    vigilar_con(Lector::abrir(), gpus, limite, parando, tx)
+}
+
+fn vigilar_con(
+    mut lector: Option<Lector>,
+    gpus: Vec<(Arc<dyn Mando>, Option<String>)>,
+    limite: Arc<AtomicU32>,
+    parando: Arc<AtomicBool>,
+    tx: UnboundedSender<String>,
+) {
     let mut repartos: Vec<Reparto> = gpus.iter().map(|_| Reparto::default()).collect();
     let pid = std::process::id();
     loop {
@@ -231,15 +238,17 @@ pub fn vigilar(
             }
             std::thread::sleep(CADA / 10);
         }
-        let Some(lecturas) = lector.leer() else {
-            continue;
-        };
+        // Sin contadores el límite elegido se sigue cumpliendo: antes el motor iba al 100 % sin avisar.
+        let lecturas = lector.as_mut().and_then(Lector::leer);
         let tope = limite.load(Ordering::Relaxed);
         let dispositivos: Vec<_> = gpus
             .iter()
             .zip(&mut repartos)
             .map(|((mando, luid), reparto)| {
-                let uso = luid.as_deref().map(|luid| repartir(&lecturas, pid, luid));
+                let uso = lecturas
+                    .as_ref()
+                    .zip(luid.as_deref())
+                    .map(|(lecturas, luid)| repartir(lecturas, pid, luid));
                 let otros = uso.map(|u| u.otros);
                 let parte = if tope == SIN_LIMITE {
                     *reparto = Reparto::default();
@@ -330,6 +339,38 @@ mod pruebas {
                 otros: 0.0
             }
         );
+    }
+
+    #[test]
+    fn sin_contadores_de_windows_el_limite_se_cumple_igual() {
+        #[derive(Default)]
+        struct Freno(AtomicU32);
+        impl Mando for Freno {
+            fn fijar(&self, limite: u32, _apartado: bool) {
+                self.0.store(limite, Ordering::SeqCst);
+            }
+        }
+        let freno = Arc::new(Freno::default());
+        let parando = Arc::new(AtomicBool::new(false));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let hilo = {
+            let (freno, parando) = (freno.clone(), parando.clone());
+            std::thread::spawn(move || {
+                vigilar_con(
+                    None,
+                    vec![(freno as Arc<dyn Mando>, None)],
+                    Arc::new(AtomicU32::new(60)),
+                    parando,
+                    tx,
+                )
+            })
+        };
+        let aviso: serde_json::Value = serde_json::from_str(&rx.blocking_recv().unwrap()).unwrap();
+        parando.store(true, Ordering::SeqCst);
+        hilo.join().unwrap();
+        assert_eq!(freno.0.load(Ordering::SeqCst), 60);
+        assert_eq!(aviso["devices"][0]["share"], 60);
+        assert!(aviso["devices"][0]["others"].is_null());
     }
 
     #[test]
