@@ -32,6 +32,28 @@ const SILENCIO_MAXIMO: Duration = Duration::from_secs(180);
 const REINTENTO_MAXIMO: Duration = Duration::from_secs(30);
 /// Conexiones seguidas que pueden acabar por un mensaje del pool que no se entiende antes de darlo por definitivo.
 const RAROS_SEGUIDOS: u32 = 5;
+/// Trabajos seguidos de Pearl con otra versión de certificado antes de darlo por definitivo: uno suelto puede ser un
+/// cambio que el pool deshace; tres seguidos son la red, que ha cambiado.
+const OTRA_VERSION_SEGUIDA: u32 = 3;
+
+/// Cuenta los trabajos seguidos de Pearl con una versión de certificado que el motor no mina, y da el aviso cuando
+/// llegan a `OTRA_VERSION_SEGUIDA`. El motor se salta esos trabajos sin decir nada: sin esto el programa seguía
+/// «minando» Pearl a velocidad cero, y en automático no pasaba a la otra moneda.
+fn otra_version(seguidos: &mut u32, version: Option<u64>) -> Option<String> {
+    let version = version?;
+    if version == tokenminer_pearl::CERT_VERSION {
+        *seguidos = 0;
+        return None;
+    }
+    *seguidos += 1;
+    (*seguidos >= OTRA_VERSION_SEGUIDA).then(|| {
+        format!(
+            "Pearl ha cambiado de versión de certificado (ahora la {version}; este programa mina la {}). \
+             Hace falta actualizar TokenMiner para seguir minando Pearl.",
+            tokenminer_pearl::CERT_VERSION
+        )
+    })
+}
 
 /// Porcentaje del tiempo de minado que va a TokenMiner cuando el usuario cobra directamente, y su cuenta, que debe
 /// ser la misma con la que la web mina tokens. Se fijan al compilar con `build.ps1 -Comision -CuentaComision`.
@@ -285,6 +307,7 @@ async fn sesion_pearl<S: AsyncRead + AsyncWrite>(
     .await?;
     let mut id = 1u64;
     let mut dentro = false;
+    let mut de_otra_version = 0;
     let silencio = sleep(ESPERA_CONEXION);
     tokio::pin!(silencio);
     loop {
@@ -297,6 +320,9 @@ async fn sesion_pearl<S: AsyncRead + AsyncWrite>(
                 let v: Value = serde_json::from_str(&linea).map_err(|e| Fin::Raro(format!("Mensaje del pool: {e}")))?;
                 silencio.as_mut().reset(Instant::now() + SILENCIO_MAXIMO);
                 if v["method"] == "mining.notify" {
+                    if let Some(aviso) = otra_version(&mut de_otra_version, v["params"]["cert_version"].as_u64()) {
+                        return Err(Fin::Definitivo(aviso));
+                    }
                     mina.mesa.recibir(mina.conexion, v["params"].clone()).map_err(Fin::Raro)?;
                     if !dentro {
                         dentro = true;
@@ -765,6 +791,37 @@ mod pruebas {
         b.pool.get_mut().write_all(b"esto no es json
 ").await.unwrap();
         assert!(matches!(b.tarea.await.unwrap(), Err(Fin::Raro(_))));
+    }
+
+    #[tokio::test]
+    async fn pearl_con_otra_version_de_certificado_se_dice_y_no_se_mina_en_vacio() {
+        let mut b = abrir(USUARIO);
+        leer(&mut b).await;
+        enviar(&mut b, json!({"id": 1, "result": true, "error": null})).await;
+        let mut nuevo = parametros("v4");
+        nuevo["cert_version"] = json!(tokenminer_pearl::CERT_VERSION + 1);
+        for _ in 0..OTRA_VERSION_SEGUIDA {
+            enviar(&mut b, json!({"method": "mining.notify", "params": nuevo})).await;
+        }
+        let Err(Fin::Definitivo(aviso)) = b.tarea.await.unwrap() else {
+            panic!("debía acabar con un error definitivo")
+        };
+        assert!(aviso.contains("certificado") && aviso.contains("actualizar"), "{aviso}");
+    }
+
+    #[test]
+    fn un_trabajo_suelto_de_otra_version_no_para_nada() {
+        let (esta, otra) = (tokenminer_pearl::CERT_VERSION, tokenminer_pearl::CERT_VERSION + 1);
+        let mut seguidos = 0;
+        assert_eq!(otra_version(&mut seguidos, Some(otra)), None);
+        assert_eq!(otra_version(&mut seguidos, Some(otra)), None);
+        // Un trabajo de la versión que se mina pone la cuenta a cero.
+        assert_eq!(otra_version(&mut seguidos, Some(esta)), None);
+        assert_eq!(otra_version(&mut seguidos, Some(otra)), None);
+        assert_eq!(otra_version(&mut seguidos, Some(otra)), None);
+        assert!(otra_version(&mut seguidos, Some(otra)).is_some());
+        // Sin el campo no se cuenta: ese trabajo ya se rechaza por ilegible.
+        assert_eq!(otra_version(&mut 2, None), None);
     }
 
     #[test]
