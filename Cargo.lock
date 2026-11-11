@@ -574,7 +574,7 @@ checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 [[package]]
 name = "engine-cpu"
 version = "4.2.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.0#6202fd6adfac2af271179d1fc9b1e6e1f5c6c7c5"
+source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.1#2f275f2c61f3db4b8d638e3c138d5002af54ff40"
 dependencies = [
  "pow-core",
  "primitive-types 0.13.1",
@@ -583,7 +583,7 @@ dependencies = [
 [[package]]
 name = "engine-gpu"
 version = "4.2.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.0#6202fd6adfac2af271179d1fc9b1e6e1f5c6c7c5"
+source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.1#2f275f2c61f3db4b8d638e3c138d5002af54ff40"
 dependencies = [
  "bytemuck",
  "engine-cpu",
@@ -1519,7 +1519,7 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 [[package]]
 name = "layout-macro"
 version = "0.1.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2018,7 +2018,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 [[package]]
 name = "pearl-blake3"
 version = "0.1.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2048,7 +2048,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 [[package]]
 name = "plonky2"
 version = "1.1.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2060,8 +2060,8 @@ dependencies = [
  "log",
  "num",
  "plonky2_field",
- "plonky2_maybe_rayon 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0)",
- "plonky2_util 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0)",
+ "plonky2_maybe_rayon 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1)",
+ "plonky2_util 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1)",
  "rand 0.8.8",
  "rand_chacha 0.3.1",
  "serde",
@@ -2073,12 +2073,12 @@ dependencies = [
 [[package]]
 name = "plonky2_field"
 version = "1.0.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
  "num",
- "plonky2_util 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0)",
+ "plonky2_util 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1)",
  "rand 0.8.8",
  "serde",
  "static_assertions",
@@ -2097,7 +2097,7 @@ dependencies = [
 [[package]]
 name = "plonky2_maybe_rayon"
 version = "1.0.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 dependencies = [
  "rayon",
 ]
@@ -2111,7 +2111,7 @@ checksum = "c32c137808ca984ab2458b612b7eb0462d853ee041a3136e83d54b96074c7610"
 [[package]]
 name = "plonky2_util"
 version = "1.0.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 
 [[package]]
 name = "portable-atomic"
@@ -2140,7 +2140,7 @@ dependencies = [
 [[package]]
 name = "pow-core"
 version = "4.2.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.0#6202fd6adfac2af271179d1fc9b1e6e1f5c6c7c5"
+source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.1#2f275f2c61f3db4b8d638e3c138d5002af54ff40"
 dependencies = [
  "primitive-types 0.13.1",
  "qp-poseidon-core 3.1.0",
@@ -2895,7 +2895,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "starky"
 version = "1.1.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2906,8 +2906,8 @@ dependencies = [
  "log",
  "num-bigint",
  "plonky2",
- "plonky2_maybe_rayon 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0)",
- "plonky2_util 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0)",
+ "plonky2_maybe_rayon 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1)",
+ "plonky2_util 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1)",
  "serde",
  "sorted-vec",
  "structopt",
@@ -3189,8 +3189,8 @@ dependencies = [
 
 [[package]]
 name = "tokenminer-pearl"
-version = "0.2.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+version = "0.2.1"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 dependencies = [
  "base64 0.21.7",
  "bincode",
@@ -3204,8 +3204,8 @@ dependencies = [
 
 [[package]]
 name = "tokenminer-quantus"
-version = "0.2.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.0#6202fd6adfac2af271179d1fc9b1e6e1f5c6c7c5"
+version = "0.2.1"
+source = "git+https://github.com/alvarowrrior/tokenminer-quantus?tag=v0.2.1#2f275f2c61f3db4b8d638e3c138d5002af54ff40"
 dependencies = [
  "bytemuck",
  "cudarc",
@@ -3795,7 +3795,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4165,7 +4165,7 @@ dependencies = [
 [[package]]
 name = "zk-pow"
 version = "0.1.0"
-source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0#a682e843c353b8e95e5ad575812ba29d5697563a"
+source = "git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1#dbe5fc74b412096298ac90256ce2eccdc6a01bc6"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -4180,7 +4180,7 @@ dependencies = [
  "pearl-blake3",
  "plonky2",
  "plonky2_field",
- "plonky2_maybe_rayon 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.0)",
+ "plonky2_maybe_rayon 1.0.0 (git+https://github.com/alvarowrrior/tokenminer-pearl?tag=v0.2.1)",
  "primitive-types 0.12.2",
  "rand 0.9.5",
  "serde",

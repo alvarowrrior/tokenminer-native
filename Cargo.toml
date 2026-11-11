@@ -28,10 +28,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21"
 wgpu = "27.0.1"
-tokenminer-quantus = { git = "https://github.com/alvarowrrior/tokenminer-quantus", tag = "v0.2.0" }
+tokenminer-quantus = { git = "https://github.com/alvarowrrior/tokenminer-quantus", tag = "v0.2.1" }
 
 [target.'cfg(windows)'.dependencies]
-tokenminer-pearl = { git = "https://github.com/alvarowrrior/tokenminer-pearl", tag = "v0.2.0" }
+tokenminer-pearl = { git = "https://github.com/alvarowrrior/tokenminer-pearl", tag = "v0.2.1" }
 tokio-native-tls = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }
 winreg = "0.52"
