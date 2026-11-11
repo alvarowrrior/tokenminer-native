@@ -30,6 +30,8 @@ const ESPERA_CONEXION: Duration = Duration::from_secs(15);
 // Llega un trabajo cada 35 s de media: tanto silencio es una conexión muerta.
 const SILENCIO_MAXIMO: Duration = Duration::from_secs(180);
 const REINTENTO_MAXIMO: Duration = Duration::from_secs(30);
+/// Conexiones seguidas que pueden acabar por un mensaje del pool que no se entiende antes de darlo por definitivo.
+const RAROS_SEGUIDOS: u32 = 5;
 
 /// Porcentaje del tiempo de minado que va a TokenMiner cuando el usuario cobra directamente, y su cuenta, que debe
 /// ser la misma con la que la web mina tokens. Se fijan al compilar con `build.ps1 -Comision -CuentaComision`.
@@ -203,6 +205,9 @@ impl Mina {
 enum Fin {
     /// Se reintenta: red, pool caído o silencio.
     Cortada(String),
+    /// El pool mandó algo que no se entiende. Una vez puede ser un fallo suyo y se reintenta; si se repite en
+    /// cada conexión, reintentar no lo arregla.
+    Raro(String),
     /// Reintentar no lo arregla.
     Definitivo(String),
 }
@@ -289,10 +294,10 @@ async fn sesion_pearl<S: AsyncRead + AsyncWrite>(
                 if linea.trim().is_empty() {
                     continue;
                 }
-                let v: Value = serde_json::from_str(&linea).map_err(|e| Fin::Definitivo(format!("Mensaje del pool: {e}")))?;
+                let v: Value = serde_json::from_str(&linea).map_err(|e| Fin::Raro(format!("Mensaje del pool: {e}")))?;
                 silencio.as_mut().reset(Instant::now() + SILENCIO_MAXIMO);
                 if v["method"] == "mining.notify" {
-                    mina.mesa.recibir(mina.conexion, v["params"].clone()).map_err(Fin::Definitivo)?;
+                    mina.mesa.recibir(mina.conexion, v["params"].clone()).map_err(Fin::Raro)?;
                     if !dentro {
                         dentro = true;
                         mina.avisar(json!({"type": "pool", "state": "connected"}));
@@ -340,16 +345,16 @@ async fn sesion_quantus<S: AsyncRead + AsyncWrite>(
                 if linea.trim().is_empty() {
                     continue;
                 }
-                let v: Value = serde_json::from_str(&linea).map_err(|e| Fin::Definitivo(format!("Mensaje del pool: {e}")))?;
+                let v: Value = serde_json::from_str(&linea).map_err(|e| Fin::Raro(format!("Mensaje del pool: {e}")))?;
                 silencio.as_mut().reset(Instant::now() + SILENCIO_MAXIMO);
                 if v["method"] == "job" {
-                    mina.mesa.recibir(mina.conexion, v["params"]["job"].clone()).map_err(Fin::Definitivo)?;
+                    mina.mesa.recibir(mina.conexion, v["params"]["job"].clone()).map_err(Fin::Raro)?;
                 } else if v["id"] == 1 && sesion.is_none() {
                     let Some(nombre) = v["result"]["id"].as_str().filter(|s| !s.is_empty() && s.len() <= 256) else {
                         return Err(Fin::Definitivo(format!("El pool no acepta esta cuenta: {}", v["error"])));
                     };
                     sesion = Some(nombre.to_string());
-                    mina.mesa.recibir(mina.conexion, v["result"]["job"].clone()).map_err(Fin::Definitivo)?;
+                    mina.mesa.recibir(mina.conexion, v["result"]["job"].clone()).map_err(Fin::Raro)?;
                     mina.avisar(json!({"type": "pool", "state": "connected"}));
                 } else if v["id"].is_u64() {
                     let aceptada = v["error"].is_null() && v["result"]["status"] == "OK";
@@ -397,10 +402,32 @@ async fn sesion<S: AsyncRead + AsyncWrite>(
     }
 }
 
+/// Qué hacer cuando acaba una conexión: reconectar (con el motivo, si lo hay) o dejarlo con un error. `raros`
+/// cuenta las conexiones seguidas que acabaron por un mensaje que no se entiende; una conexión `larga` lo pone a cero.
+fn seguir(fin: Result<(), Fin>, raros: &mut u32, larga: bool) -> Result<Option<String>, String> {
+    if larga {
+        *raros = 0;
+    }
+    match fin {
+        Ok(()) => Ok(None),
+        Err(Fin::Cortada(e)) => Ok(Some(e)),
+        Err(Fin::Definitivo(e)) => Err(e),
+        Err(Fin::Raro(e)) => {
+            *raros += 1;
+            if *raros >= RAROS_SEGUIDOS {
+                Err(e)
+            } else {
+                Ok(Some(e))
+            }
+        }
+    }
+}
+
 /// Mantiene una conexión hasta que aborten la tarea, reconectando si hace falta. Sin la del usuario el motor para:
 /// sus shares no llegarían. Sin la de la comisión sigue minando para el usuario.
 pub async fn minar(mina: Mina, mut shares: UnboundedReceiver<Share>) {
     let mut espera = Duration::from_secs(1);
+    let mut raros = 0;
     loop {
         mina.avisar(json!({"type": "pool", "state": "connecting"}));
         let inicio = Instant::now();
@@ -411,17 +438,18 @@ pub async fn minar(mina: Mina, mut shares: UnboundedReceiver<Share>) {
         };
         let _ = mina.mesa.perder(mina.conexion);
         while shares.try_recv().is_ok() {}
-        match fin {
-            Err(Fin::Definitivo(e)) => {
+        let larga = inicio.elapsed() > REINTENTO_MAXIMO;
+        match seguir(fin, &mut raros, larga) {
+            Err(e) => {
                 mina.avisar(json!({"type": "error", "message": e}));
                 return;
             }
-            Err(Fin::Cortada(e)) => {
+            Ok(Some(e)) => {
                 mina.avisar(json!({"type": "pool", "state": "reconnecting", "reason": e}))
             }
-            Ok(()) => {}
+            Ok(None) => {}
         }
-        if inicio.elapsed() > REINTENTO_MAXIMO {
+        if larga {
             espera = Duration::from_secs(1);
         }
         sleep(espera).await;
@@ -726,7 +754,35 @@ mod pruebas {
             json!({"method": "mining.notify", "params": {"job_id": "j"}}),
         )
         .await;
-        assert!(matches!(b.tarea.await.unwrap(), Err(Fin::Definitivo(_))));
+        assert!(matches!(b.tarea.await.unwrap(), Err(Fin::Raro(_))));
         assert!(b.ordenes.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn una_linea_ilegible_corta_la_conexion_sin_darla_por_perdida() {
+        let mut b = abrir(USUARIO);
+        leer(&mut b).await;
+        b.pool.get_mut().write_all(b"esto no es json
+").await.unwrap();
+        assert!(matches!(b.tarea.await.unwrap(), Err(Fin::Raro(_))));
+    }
+
+    #[test]
+    fn un_mensaje_raro_se_reintenta_y_solo_repetido_para() {
+        let raro = || Err(Fin::Raro("raro".into()));
+        let mut raros = 0;
+        // Un mensaje que no se entiende reconecta; antes paraba el minado para siempre.
+        for _ in 1..RAROS_SEGUIDOS {
+            assert_eq!(seguir(raro(), &mut raros, false), Ok(Some("raro".into())));
+        }
+        assert_eq!(seguir(raro(), &mut raros, false), Err("raro".into()));
+        // Una conexión que duró pone la cuenta a cero: fallos sueltos no se acumulan.
+        let mut raros = RAROS_SEGUIDOS - 1;
+        assert_eq!(seguir(raro(), &mut raros, true), Ok(Some("raro".into())));
+        assert_eq!(raros, 1);
+        // Un corte de red siempre se reintenta, y una cuenta rechazada nunca.
+        assert_eq!(seguir(Err(Fin::Cortada("red".into())), &mut raros, false), Ok(Some("red".into())));
+        assert_eq!(seguir(Err(Fin::Definitivo("cuenta".into())), &mut raros, false), Err("cuenta".into()));
+        assert_eq!(seguir(Ok(()), &mut raros, false), Ok(None));
     }
 }
