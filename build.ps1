@@ -4,12 +4,15 @@ param(
   [string[]]$Origin,
   # Parte del tiempo que mina para TokenMiner quien cobra directamente, y la cuenta de Kryptex que la recibe.
   [ValidateRange(0, 50)]
-  [int]$Comision = 10,
+  [int]$Comision = 7,
   [ValidatePattern('^krx[A-Za-z0-9]+$')]
   [string]$CuentaComision = 'krxY96J9JD'
 )
 
 $ErrorActionPreference = 'Stop'
+# La versión del manifiesto es la de Cargo.toml: escrita aquí a mano se quedaba atrás.
+$version = (Select-String -LiteralPath (Join-Path $PSScriptRoot 'Cargo.toml') -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+if (-not $version) { throw 'No se encontro la version en Cargo.toml' }
 $origins = @($Origin | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim().TrimEnd('/') } | Where-Object { $_ })
 if ($origins.Count -eq 0) { throw 'Falta Origin' }
 foreach ($o in $origins) {
@@ -51,7 +54,7 @@ Copy-Item -LiteralPath $installer -Destination $published -Force
   feePercent = $Comision
   feeAccount = $CuentaComision
   sha256 = $hash
-  version = '0.9.3'
+  version = $version
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $public 'native-manifest.json') -Encoding utf8
 Write-Output "Paquete preparado para $($origins -join ', ') en $published"
 Write-Output "SHA256: $hash"

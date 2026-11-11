@@ -59,7 +59,7 @@ fn otra_version(seguidos: &mut u32, version: Option<u64>) -> Option<String> {
 /// ser la misma con la que la web mina tokens. Se fijan al compilar con `build.ps1 -Comision -CuentaComision`.
 pub const COMISION: u32 = match option_env!("TOKENMINER_COMISION") {
     Some(texto) => porcentaje(texto),
-    None => 10,
+    None => 7,
 };
 const CUENTA_COMISION: &str = match option_env!("TOKENMINER_CUENTA_COMISION") {
     Some(cuenta) => cuenta,

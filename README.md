@@ -18,8 +18,9 @@ contiene su código completo para que cualquiera pueda comprobar qué hace antes
 - **Deja sitio a los juegos.** Lee cuánta GPU usan los demás programas con los contadores de
   Windows y reparte el tiempo para no pasar del límite elegido, de 0 a 100 %.
 - **Varias gráficas.** Un motor por GPU, con sus propias medidas.
-- **No toca los ajustes de la tarjeta.** Ni voltajes, ni curvas, ni frecuencias: sólo lee uso y
-  consumo.
+- **No toca voltajes, curvas ni frecuencias.** Sólo lee uso y consumo. La única excepción es el
+  modo eficiencia, que es opcional: baja el límite de potencia de la tarjeta mientras mina y lo
+  devuelve al parar.
 - **Funciona con la web cerrada.** Se queda en la bandeja del sistema, con horario y arranque
   opcional con el equipo.
 
@@ -57,10 +58,10 @@ El navegador pedirá permiso para alcanzar el equipo la primera vez.
 ## Comisión
 
 Quien cobra directamente en su cartera cede una parte del tiempo de minado a la cuenta de
-TokenMiner, mediante turnos. El porcentaje se fija al compilar y el programa lo publica en su
-estado, de modo que la web puede enseñarlo. **El cálculo de rentabilidad descuenta esa parte**: la
-decisión de minar o parar se toma con lo que se lleva el usuario, no con el total. Quien elige
-cobrar en créditos de IA no paga comisión.
+TokenMiner, mediante turnos: un 7 % en la versión que se publica. El porcentaje se fija al
+compilar y el programa lo publica en su estado, de modo que la web puede enseñarlo. **El cálculo
+de rentabilidad descuenta esa parte**: la decisión de minar o parar se toma con lo que se lleva el
+usuario, no con el total. Quien elige cobrar en créditos de IA no paga comisión.
 
 Está en `src/pool.rs` y `src/residente.rs`, y hay pruebas que lo comprueban.
 
