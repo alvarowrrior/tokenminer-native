@@ -133,6 +133,21 @@ fn techo(moneda: Option<Moneda>, sm: Option<u32>, reloj_mhz: Option<f64>) -> Opt
     }
 }
 
+/// Lo que consumen ahora las GPU que están minando, en vatios, o `None` si no se sabe: sin lectura de `nvidia-smi`,
+/// o si alguna de las que minan no dice su consumo. Las que no minan no cuentan: lo suyo no lo gasta el minado.
+/// `gpus` y `dispositivos` van en el mismo orden.
+fn vatios_minando(gpus: &[Gpu], dispositivos: &[Dispositivo]) -> Option<f64> {
+    let mut total = 0.0;
+    for (gpu, _) in gpus
+        .iter()
+        .zip(dispositivos)
+        .filter(|(_, d)| d.rate > 0.0)
+    {
+        total += gpu.power_w?;
+    }
+    (total > 0.0).then_some(total)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Estado<'a> {
@@ -152,6 +167,8 @@ struct Estado<'a> {
     coin: Option<Moneda>,
     coins: Vec<Opcion>,
     economics: Option<Economia>,
+    /// Se mina sin saber lo que consume la gráfica: no hay cuentas de la luz ni se puede comprobar si renta.
+    power_unknown: bool,
     /// Modo eficiencia: el límite de potencia pedido, si está puesto y, si no, por qué.
     efficiency: &'a potencia::Estado,
 }
@@ -270,6 +287,10 @@ impl Residente {
                 price_kwh: c.precio_kwh,
                 profitable: c.beneficio() > 0.0,
             }),
+            power_unknown: self
+                .moneda
+                .and_then(|m| self.medidas.get(&m))
+                .is_some_and(|m| m.vatios.is_none()),
             efficiency: &self.eficiencia,
         };
         self.estado
@@ -310,7 +331,7 @@ impl Residente {
             moneda,
             &self.ajustes.electricity,
             medida.tasa,
-            medida.vatios,
+            medida.vatios?,
             self.parte(),
             Momento::ahora().hora,
         )
@@ -413,8 +434,9 @@ impl Residente {
     }
 
     /// La medida sirve para las cuentas de la luz sólo si la gráfica era casi toda del motor: con un juego, el consumo
-    /// es sobre todo del juego. El escritorio, un fondo animado o el navegador ya ocupan un 5–15 %.
-    fn medir(&mut self, vatios: f64) {
+    /// es sobre todo del juego. El escritorio, un fondo animado o el navegador ya ocupan un 5–15 %. Sin `vatios` se
+    /// mide sólo la velocidad.
+    fn medir(&mut self, vatios: Option<f64>) {
         let Some(moneda) = self.moneda else { return };
         if self.fase == "mining"
             && self.rate > 0.0
@@ -764,12 +786,8 @@ pub async fn correr(origen: String) -> Result<(), Box<dyn std::error::Error>> {
                 Entrada::Bandeja(bandeja::Orden::Parar) => { r.plan.ordenar(false); r.repasar(); }
                 Entrada::Bandeja(bandeja::Orden::Salir) => break,
                 Entrada::Gpus(gpus) => {
-                    // Todas las GPU minan: el consumo es el de todas.
-                    let vatios: Option<f64> = gpus.iter().map(|g| g.power_w).sum();
-                    if let Some(vatios) = vatios {
-                        r.medir(vatios);
-                    }
                     r.gpus = gpus;
+                    r.medir(vatios_minando(&r.gpus, &r.dispositivos));
                     r.publicar();
                 }
                 Entrada::Mercado(mercado) => { r.mercado = Some(mercado); r.repasar(); }
@@ -804,6 +822,36 @@ mod pruebas {
         assert_eq!(techo(Some(Moneda::Pearl), None, Some(2270.0)), None);
         assert_eq!(techo(Some(Moneda::Pearl), Some(24), None), None);
         assert_eq!(techo(Some(Moneda::Pearl), Some(24), Some(0.0)), None);
+    }
+
+    #[test]
+    fn el_consumo_es_el_de_las_gpu_que_minan_y_si_falta_no_se_inventa() {
+        let gpu = |vatios: Option<f64>| Gpu {
+            name: "GPU".into(),
+            use_percent: None,
+            memory_used_mb: None,
+            memory_total_mb: None,
+            temperature_c: None,
+            power_w: vatios,
+            clock_mhz: None,
+        };
+        let minando = |tasa: f64| Dispositivo {
+            rate: tasa,
+            ..Default::default()
+        };
+        // Sin lectura de nvidia-smi no hay consumo: antes salían 0 W y la luz parecía gratis.
+        assert_eq!(vatios_minando(&[], &[minando(80e12)]), None);
+        assert_eq!(vatios_minando(&[gpu(Some(114.0))], &[]), None);
+        assert_eq!(vatios_minando(&[gpu(Some(114.0))], &[minando(80e12)]), Some(114.0));
+        // Dos que minan suman; una que mina sin decir su consumo deja el total sin saber.
+        let dos = [gpu(Some(114.0)), gpu(Some(200.0))];
+        assert_eq!(vatios_minando(&dos, &[minando(1.0), minando(1.0)]), Some(314.0));
+        let una_muda = [gpu(Some(114.0)), gpu(None)];
+        assert_eq!(vatios_minando(&una_muda, &[minando(1.0), minando(1.0)]), None);
+        // La que no mina no cuenta, diga o no su consumo: antes una GPU muda impedía medir para siempre.
+        assert_eq!(vatios_minando(&una_muda, &[minando(1.0), minando(0.0)]), Some(114.0));
+        assert_eq!(vatios_minando(&dos, &[minando(1.0), minando(0.0)]), Some(114.0));
+        assert_eq!(vatios_minando(&[gpu(Some(0.0))], &[minando(1.0)]), None);
     }
 
     #[test]

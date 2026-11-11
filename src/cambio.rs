@@ -23,11 +23,12 @@ const VENTAJA: f64 = 1.05;
 const SEGUIDA: Duration = Duration::from_secs(30 * 60);
 const PERMANENCIA: Duration = Duration::from_secs(30 * 60);
 
-/// Velocidad y vatios de la gráfica medidos minando una moneda, suavizados.
+/// Velocidad y vatios de la gráfica medidos minando una moneda, suavizados. Sin vatios cuando la gráfica no dice lo
+/// que consume: la moneda se puede elegir por lo que gana, pero no se sabe lo que cuesta.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Medida {
     pub tasa: f64,
-    pub vatios: f64,
+    pub vatios: Option<f64>,
     #[serde(default = "completa")]
     pub muestras: u32,
 }
@@ -41,8 +42,9 @@ impl Medida {
         self.muestras >= MUESTRAS
     }
 
-    /// Las primeras muestras pesan más, para llegar pronto a la cifra; después cambia despacio.
-    pub fn sumar(anterior: Option<Medida>, tasa: f64, vatios: f64) -> Medida {
+    /// Las primeras muestras pesan más, para llegar pronto a la cifra; después cambia despacio. Una lectura sin
+    /// vatios no borra los que ya se conocían.
+    pub fn sumar(anterior: Option<Medida>, tasa: f64, vatios: Option<f64>) -> Medida {
         match anterior {
             None => Medida {
                 tasa,
@@ -51,9 +53,13 @@ impl Medida {
             },
             Some(m) => {
                 let peso = 1.0 / (m.muestras.min(MUESTRAS) as f64 + 1.0).min(10.0);
+                let suave = |antes: f64, ahora: f64| antes + (ahora - antes) * peso;
                 Medida {
-                    tasa: m.tasa + (tasa - m.tasa) * peso,
-                    vatios: m.vatios + (vatios - m.vatios) * peso,
+                    tasa: suave(m.tasa, tasa),
+                    vatios: match (m.vatios, vatios) {
+                        (Some(antes), Some(ahora)) => Some(suave(antes, ahora)),
+                        (antes, ahora) => ahora.or(antes),
+                    },
                     muestras: m.muestras.saturating_add(1),
                 }
             }
@@ -63,14 +69,15 @@ impl Medida {
 
 pub type Medidas = HashMap<Moneda, Medida>;
 
-/// Las medidas se guardan junto a los ajustes: tras reiniciar no hace falta volver a medir.
+/// Las medidas se guardan junto a los ajustes: tras reiniciar no hace falta volver a medir. Una medida con 0 W no
+/// vale: una gráfica que mina siempre consume, y con 0 W la luz saldría gratis.
 pub fn leer(ruta: &Path) -> Medidas {
     std::fs::read(ruta)
         .ok()
         .and_then(|b| serde_json::from_slice::<Medidas>(&b).ok())
         .unwrap_or_default()
         .into_iter()
-        .filter(|(_, m)| m.tasa > 0.0 && m.vatios >= 0.0)
+        .filter(|(_, m)| m.tasa > 0.0 && m.vatios.is_none_or(|v| v > 0.0))
         .collect()
 }
 
@@ -196,7 +203,7 @@ mod pruebas {
                 Moneda::Pearl,
                 Medida {
                     tasa: 80e12,
-                    vatios: 110.0,
+                    vatios: Some(110.0),
                     muestras: MUESTRAS,
                 },
             );
@@ -206,7 +213,7 @@ mod pruebas {
                 Moneda::Quantus,
                 Medida {
                     tasa: 277e6,
-                    vatios: 105.0,
+                    vatios: Some(105.0),
                     muestras: MUESTRAS,
                 },
             );
@@ -368,23 +375,56 @@ mod pruebas {
 
     #[test]
     fn la_medida_se_suaviza_y_se_guarda() {
-        let mut m = Medida::sumar(None, 100.0, 100.0);
+        let mut m = Medida::sumar(None, 100.0, Some(100.0));
         for _ in 0..MUESTRAS {
-            m = Medida::sumar(Some(m), 80.0, 110.0);
+            m = Medida::sumar(Some(m), 80.0, Some(110.0));
         }
         assert!(
-            m.lista() && (m.tasa - 80.0).abs() < 1.0 && (m.vatios - 110.0).abs() < 1.0,
+            m.lista() && (m.tasa - 80.0).abs() < 1.0 && (m.vatios.unwrap() - 110.0).abs() < 1.0,
             "{m:?}"
         );
         let ruta =
             std::env::temp_dir().join(format!("tokenminer-medidas-{}.json", std::process::id()));
         let mut todas = Medidas::new();
         todas.insert(Moneda::Pearl, m);
-        todas.insert(Moneda::Quantus, Medida::sumar(None, 1.0, 1.0));
+        todas.insert(Moneda::Quantus, Medida::sumar(None, 1.0, Some(1.0)));
         guardar(&ruta, &todas);
         let leidas = leer(&ruta);
         assert_eq!(leidas.len(), 1);
         assert!(leidas[&Moneda::Pearl].lista());
+        std::fs::remove_file(ruta).unwrap();
+    }
+
+    #[test]
+    fn sin_vatios_no_se_inventa_el_consumo() {
+        // Sin lectura de consumo la medida se completa igual, sin vatios: no con 0 W.
+        let mut m = Medida::sumar(None, 80.0, None);
+        for _ in 0..MUESTRAS {
+            m = Medida::sumar(Some(m), 80.0, None);
+        }
+        assert!(m.lista() && m.vatios.is_none(), "{m:?}");
+        // Cuando llega una lectura se toma, y una lectura que falta después no la borra.
+        m = Medida::sumar(Some(m), 80.0, Some(110.0));
+        assert_eq!(m.vatios, Some(110.0));
+        m = Medida::sumar(Some(m), 80.0, None);
+        assert_eq!(m.vatios, Some(110.0));
+    }
+
+    #[test]
+    fn una_medida_guardada_con_cero_vatios_se_descarta() {
+        let ruta =
+            std::env::temp_dir().join(format!("tokenminer-medidas-cero-{}.json", std::process::id()));
+        std::fs::write(
+            &ruta,
+            r#"{"pearl":{"tasa":8e13,"vatios":-0.0,"muestras":36},"quantus":{"tasa":2.7e8,"vatios":105.0,"muestras":36}}"#,
+        )
+        .unwrap();
+        let leidas = leer(&ruta);
+        assert_eq!(leidas.len(), 1);
+        assert_eq!(leidas[&Moneda::Quantus].vatios, Some(105.0));
+        // Una medida sin vatios sí vale: sirve para elegir moneda.
+        std::fs::write(&ruta, r#"{"pearl":{"tasa":8e13,"vatios":null,"muestras":36}}"#).unwrap();
+        assert_eq!(leer(&ruta)[&Moneda::Pearl].vatios, None);
         std::fs::remove_file(ruta).unwrap();
     }
 }
