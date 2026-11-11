@@ -163,6 +163,28 @@ mod windows {
         Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("TokenMiner"))
     }
 
+    /// Si dos rutas son el mismo archivo, se escriban como se escriban.
+    fn same_file(a: &Path, b: &Path) -> bool {
+        match (fs::canonicalize(a), fs::canonicalize(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == b,
+        }
+    }
+
+    /// Windows no deja que un programa borre su propio ejecutable mientras corre, y dejarlo para el siguiente
+    /// reinicio exige ser administrador. El desinstalador instalado se copia a la carpeta temporal y sigue desde
+    /// allí, donde sí puede borrar el original y su carpeta. Dice si lo ha hecho.
+    fn continue_from_temp(args: &[String]) -> io::Result<bool> {
+        let current = std::env::current_exe()?;
+        if !same_file(&current, &location()?.join("tokenminer-setup.exe")) {
+            return Ok(false);
+        }
+        let copy = std::env::temp_dir().join("tokenminer-uninstall.exe");
+        fs::copy(&current, &copy)?;
+        std::process::Command::new(copy).args(args).spawn()?;
+        Ok(true)
+    }
+
     fn uninstall() -> io::Result<()> {
         let folder = location()?;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -182,9 +204,22 @@ mod windows {
             let _ = fs::remove_dir_all(data);
         }
         let setup = folder.join("tokenminer-setup.exe");
+        let current = std::env::current_exe()?;
         if setup.exists() {
-            schedule_remove(&setup)?;
-            schedule_remove(&folder)?;
+            if same_file(&current, &setup) {
+                // No se pudo seguir desde la carpeta temporal: queda para el reinicio, si Windows lo permite.
+                let _ = schedule_remove(&setup);
+                let _ = schedule_remove(&folder);
+            } else {
+                remove_when_free(&setup)?;
+                // Sólo si ha quedado vacía: lo que otro haya dejado ahí no es nuestro.
+                let _ = fs::remove_dir(&folder);
+            }
+        }
+        // La copia temporal de este desinstalador no se puede borrar a sí misma; Windows la quita al reiniciar si
+        // lo permite, y si no, queda en la carpeta temporal, que el sistema limpia.
+        if current.parent().is_some_and(|p| same_file(p, &std::env::temp_dir())) {
+            let _ = schedule_remove(&current);
         }
         Ok(())
     }
@@ -193,13 +228,16 @@ mod windows {
         let args: Vec<String> = std::env::args().skip(1).collect();
         let removing = args.iter().any(|arg| arg == "--uninstall");
         let quiet = args.iter().any(|arg| arg == "--quiet");
+        if removing && continue_from_temp(&args).unwrap_or(false) {
+            return 0;
+        }
         let result = if removing { uninstall() } else { install() };
         match result {
             Ok(()) => {
                 if !quiet {
                     show(
                         if removing {
-                            "TokenMiner local se ha desinstalado. El archivo del desinstalador se borrará al reiniciar."
+                            "TokenMiner local se ha desinstalado."
                         } else {
                             "TokenMiner local está instalado para este usuario."
                         },
