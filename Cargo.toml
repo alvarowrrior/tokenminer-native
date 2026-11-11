@@ -27,7 +27,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21"
-wgpu = "27.0.1"
 tokenminer-quantus = { git = "https://github.com/alvarowrrior/tokenminer-quantus", tag = "v0.2.1" }
 
 [target.'cfg(windows)'.dependencies]
