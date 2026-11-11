@@ -567,11 +567,15 @@ impl Residente {
         self.limite
             .store(nuevos.gpu_limit.unwrap_or(SIN_LIMITE), Ordering::Relaxed);
         let otra_potencia = nuevos.power_percent != self.ajustes.power_percent;
+        let otro_limite = nuevos.gpu_limit != self.ajustes.gpu_limit;
         self.ajustes = nuevos;
-        if otra_potencia {
-            // Con otro límite la velocidad y el consumo son otros: se mide de nuevo cada moneda.
+        if otra_potencia || otro_limite {
+            // Con otro límite, de potencia o de uso, la velocidad y el consumo son otros: se mide de nuevo cada
+            // moneda. Si no, la que se mina se compararía con la medida vieja de la otra.
             self.medidas.clear();
             cambio::guardar(&self.ruta_medidas, &self.medidas);
+        }
+        if otra_potencia {
             self.eficiencia = if self.sesion.is_some() {
                 potencia::restaurar(&self.ruta_potencia);
                 potencia::aplicar(self.porcentaje(), &self.ruta_potencia)
