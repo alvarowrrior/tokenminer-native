@@ -59,15 +59,18 @@ mod windows {
         fs::read(std::env::current_exe()?.with_file_name("tokenminer-helper.exe"))
     }
 
-    /// El programa de fondo bloquea su ejecutable: se le pide cerrar y se espera a que lo suelte.
-    fn close_program() {
+    /// El programa de fondo bloquea su ejecutable: se le pide cerrar y se espera a que lo suelte. Dice si había
+    /// uno abierto.
+    fn close_program() -> bool {
         let name = wide(CLOSE_EVENT);
         unsafe {
             let event = OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr());
-            if !event.is_null() {
-                SetEvent(event);
-                CloseHandle(event);
+            if event.is_null() {
+                return false;
             }
+            SetEvent(event);
+            CloseHandle(event);
+            true
         }
     }
 
@@ -107,7 +110,7 @@ mod windows {
         fs::create_dir_all(&folder)?;
         let helper = folder.join("tokenminer-helper.exe");
         let setup = folder.join("tokenminer-setup.exe");
-        close_program();
+        let was_running = close_program();
         write_when_free(&helper, &helper_bytes()?)?;
         let current = std::env::current_exe()?;
         if current != setup {
@@ -129,7 +132,9 @@ mod windows {
             "UninstallString",
             &format!("\"{}\" --uninstall", setup.display()),
         )?;
-        if starts_with_pc() {
+        // Quien actualiza con el programa abierto lo tenía minando o esperando su hora: se vuelve a abrir, para
+        // que una actualización no lo deje parado sin avisar.
+        if was_running || starts_with_pc() {
             std::process::Command::new(&helper)
                 .arg("--background")
                 .spawn()?;
@@ -153,6 +158,11 @@ mod windows {
         }
     }
 
+    /// La carpeta de los ajustes y las medidas, que el programa crea al usarse (`ajustes::ruta`).
+    fn data_folder() -> Option<PathBuf> {
+        Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("TokenMiner"))
+    }
+
     fn uninstall() -> io::Result<()> {
         let folder = location()?;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -165,6 +175,11 @@ mod windows {
         let helper = folder.join("tokenminer-helper.exe");
         if helper.exists() {
             remove_when_free(&helper)?;
+        }
+        // Los ajustes guardan la cuenta con la que se mina: desinstalar no los deja atrás. Va después de cerrar el
+        // programa, que al salir devuelve el límite de potencia que el modo eficiencia tuviera cambiado.
+        if let Some(data) = data_folder() {
+            let _ = fs::remove_dir_all(data);
         }
         let setup = folder.join("tokenminer-setup.exe");
         if setup.exists() {
