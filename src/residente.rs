@@ -3,7 +3,7 @@
 //! Sólo las webs de los orígenes fijados al compilar pueden conectarse; el icono abre la primera. Al conectar y en cada cambio recibe
 //! `{"type":"state",…}`. Manda `{"type":"start"}`, `{"type":"stop"}`, `{"type":"settings","settings":{…}}` y
 //! `{"type":"quit"}`. La GPU sólo se ocupa mientras se mina: al parar se libera el motor.
-use crate::ajustes::{self, Ajustes, Cuando, Momento, Moneda, Plan};
+use crate::ajustes::{self, Ajustes, Cuando, Eleccion, Momento, Moneda, Plan};
 use crate::cambio::{self, Medida, Medidas, Selector};
 use crate::economia::{self, Cuentas, Mercado};
 use crate::pool::{wallet_comision, COMISION};
@@ -14,6 +14,7 @@ use crate::{pearl, quantus};
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -33,6 +34,29 @@ const ORDEN_DE_SALIDA: &str = "Local\\TokenMinerSalir";
 const LECTURA_GPU: Duration = Duration::from_secs(5);
 const SIN_VENTANA: u32 = 0x0800_0000;
 const LECTURA_MERCADO: Duration = Duration::from_secs(15 * 60);
+/// Lo que una moneda queda apartada tras fallar, con la elección en automático.
+const APARTADA: Duration = Duration::from_secs(60 * 60);
+
+/// Las monedas que han fallado hace poco: hasta cuándo quedan apartadas y por qué.
+type Apartadas = HashMap<Moneda, (Instant, String)>;
+
+/// De las monedas que se pueden minar, las que no están apartadas. Sólo en automático: quien fija una moneda la
+/// quiere a ella, falle o no. Si han fallado todas no se aparta ninguna, para seguir intentándolo.
+fn sin_apartadas(monedas: Vec<Moneda>, eleccion: Eleccion, apartadas: &Apartadas, ahora: Instant) -> Vec<Moneda> {
+    if eleccion != Eleccion::Auto {
+        return monedas;
+    }
+    let libres: Vec<Moneda> = monedas
+        .iter()
+        .copied()
+        .filter(|m| apartadas.get(m).is_none_or(|(hasta, _)| ahora >= *hasta))
+        .collect();
+    if libres.is_empty() {
+        monedas
+    } else {
+        libres
+    }
+}
 
 /// La sesión de la moneda que se mina.
 enum Sesion {
@@ -169,8 +193,16 @@ struct Estado<'a> {
     economics: Option<Economia>,
     /// Se mina sin saber lo que consume la gráfica: no hay cuentas de la luz ni se puede comprobar si renta.
     power_unknown: bool,
+    /// Las monedas apartadas por haber fallado, con el motivo: en automático se mina la otra mientras tanto.
+    unavailable: Vec<Apartada<'a>>,
     /// Modo eficiencia: el límite de potencia pedido, si está puesto y, si no, por qué.
     efficiency: &'a potencia::Estado,
+}
+
+#[derive(Serialize)]
+struct Apartada<'a> {
+    coin: Moneda,
+    reason: &'a str,
 }
 
 #[derive(Serialize)]
@@ -235,6 +267,7 @@ struct Residente {
     eficiencia: potencia::Estado,
     /// Dónde se guarda el límite de potencia original de cada GPU mientras el modo eficiencia lo cambia.
     ruta_potencia: PathBuf,
+    apartadas: Apartadas,
 }
 
 impl Residente {
@@ -291,6 +324,7 @@ impl Residente {
                 .moneda
                 .and_then(|m| self.medidas.get(&m))
                 .is_some_and(|m| m.vatios.is_none()),
+            unavailable: self.apartadas_ahora(),
             efficiency: &self.eficiencia,
         };
         self.estado
@@ -304,9 +338,23 @@ impl Residente {
     fn posibles(&self) -> Vec<Moneda> {
         let quantus = quantus::puede_minar(&self.ajustes.wallet)
             && self.mercado.as_ref().is_none_or(|m| m.quantus.is_some());
-        Moneda::TODAS
+        let monedas = Moneda::TODAS
             .into_iter()
             .filter(|m| *m == Moneda::Pearl || quantus)
+            .collect();
+        sin_apartadas(monedas, self.ajustes.coin, &self.apartadas, Instant::now())
+    }
+
+    /// Las monedas que ahora mismo no se minan por haber fallado. Sólo cuenta en automático.
+    fn apartadas_ahora(&self) -> Vec<Apartada<'_>> {
+        let ahora = Instant::now();
+        Moneda::TODAS
+            .into_iter()
+            .filter(|_| self.ajustes.coin == Eleccion::Auto)
+            .filter_map(|m| {
+                let (hasta, motivo) = self.apartadas.get(&m)?;
+                (ahora < *hasta).then_some(Apartada { coin: m, reason: motivo })
+            })
             .collect()
     }
 
@@ -543,6 +591,12 @@ impl Residente {
 
     /// El motor no se recupera solo. Con minado automático se reintenta; a mano decide el usuario.
     fn fallo(&mut self, mensaje: String) {
+        // La moneda que ha fallado se aparta un rato: en automático, el siguiente intento va con la otra en vez de
+        // repetir el mismo fallo.
+        if let Some(moneda) = self.moneda {
+            self.apartadas
+                .insert(moneda, (Instant::now() + APARTADA, mensaje.clone()));
+        }
         self.problema = Some(mensaje);
         self.parar();
         if self.ajustes.when == Cuando::Manual {
@@ -563,6 +617,8 @@ impl Residente {
             .map_err(|e| format!("No se pudieron guardar los ajustes: {e}"))?;
         if nuevos.wallet != self.ajustes.wallet || nuevos.coin != self.ajustes.coin {
             self.parar();
+            // Con otra cuenta u otra elección, lo que falló antes puede no fallar.
+            self.apartadas.clear();
         }
         self.limite
             .store(nuevos.gpu_limit.unwrap_or(SIN_LIMITE), Ordering::Relaxed);
@@ -778,6 +834,7 @@ pub async fn correr(origen: String) -> Result<(), Box<dyn std::error::Error>> {
         dispositivos: Vec::new(),
         eficiencia: potencia::consultar(ajustes_potencia),
         ruta_potencia,
+        apartadas: Apartadas::new(),
     };
     r.repasar();
     let mut repaso = tokio::time::interval(REPASO);
@@ -826,6 +883,24 @@ mod pruebas {
         assert_eq!(techo(Some(Moneda::Pearl), None, Some(2270.0)), None);
         assert_eq!(techo(Some(Moneda::Pearl), Some(24), None), None);
         assert_eq!(techo(Some(Moneda::Pearl), Some(24), Some(0.0)), None);
+    }
+
+    #[test]
+    fn la_moneda_que_falla_se_aparta_solo_en_automatico_y_solo_un_rato() {
+        let ahora = Instant::now();
+        let ambas = || vec![Moneda::Pearl, Moneda::Quantus];
+        let mut apartadas = Apartadas::new();
+        assert_eq!(sin_apartadas(ambas(), Eleccion::Auto, &apartadas, ahora), ambas());
+        apartadas.insert(Moneda::Pearl, (ahora + APARTADA, "certificado".into()));
+        // En automático se mina la otra mientras dura; pasado el rato vuelven las dos.
+        assert_eq!(sin_apartadas(ambas(), Eleccion::Auto, &apartadas, ahora), vec![Moneda::Quantus]);
+        assert_eq!(sin_apartadas(ambas(), Eleccion::Auto, &apartadas, ahora + APARTADA), ambas());
+        // Quien ha fijado una moneda la conserva aunque falle.
+        assert_eq!(sin_apartadas(ambas(), Eleccion::Pearl, &apartadas, ahora), ambas());
+        // Si la única posible está apartada, o lo están todas, se sigue intentando.
+        assert_eq!(sin_apartadas(vec![Moneda::Pearl], Eleccion::Auto, &apartadas, ahora), vec![Moneda::Pearl]);
+        apartadas.insert(Moneda::Quantus, (ahora + APARTADA, "pool".into()));
+        assert_eq!(sin_apartadas(ambas(), Eleccion::Auto, &apartadas, ahora), ambas());
     }
 
     #[test]
